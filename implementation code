@@ -1,44 +1,90 @@
+import streamlit as st
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+import plotly.express as px
+import plotly.graph_objects as go
 
-# 1. Load the dataset
-df = pd.read_csv('credit_card_fraud_dataset.csv')
+# Set Page Config
+st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 
-# 2. Preprocessing
-# Convert TransactionDate to datetime and extract useful features
-df['TransactionDate'] = pd.to_datetime(df['TransactionDate'], dayfirst=True)
-df['Hour'] = df['TransactionDate'].dt.hour
-df['DayOfWeek'] = df['TransactionDate'].dt.dayofweek
+# Title and Description
+st.title("🛡️ Credit Card Fraud Detection Dashboard")
+st.markdown("""
+This dashboard analyzes transaction data to identify patterns in fraudulent activities. 
+Upload your dataset to see real-time insights.
+""")
 
-# Encode categorical variables
-le = LabelEncoder()
-df['TransactionType'] = le.fit_transform(df['TransactionType'])
-df['Location'] = le.fit_transform(df['Location'])
+# 1. Load Data
+@st.cache_data
+def load_data():
+    df = pd.read_csv('credit_card_fraud_dataset.csv')
+    df['TransactionDate'] = pd.to_datetime(df['TransactionDate'], dayfirst=True)
+    return df
 
-# Define Features (X) and Target (y)
-# Dropping IDs and the original date string
-X = df.drop(['TransactionID', 'TransactionDate', 'IsFraud'], axis=1)
-y = df['IsFraud']
+try:
+    df = load_data()
 
-# 3. Split the data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # --- SIDEBAR FILTERS ---
+    st.sidebar.header("Filter Data")
+    location_filter = st.sidebar.multiselect("Select Location", options=df['Location'].unique(), default=df['Location'].unique())
+    type_filter = st.sidebar.multiselect("Select Transaction Type", options=df['TransactionType'].unique(), default=df['TransactionType'].unique())
 
-# 4. Feature Scaling
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+    filtered_df = df[(df['Location'].isin(location_filter)) & (df['TransactionType'].isin(type_filter))]
 
-# 5. Train Model (Random Forest is robust for tabular fraud data)
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
+    # --- ROW 1: KEY METRICS ---
+    total_tx = len(filtered_df)
+    fraud_tx = filtered_df['IsFraud'].sum()
+    fraud_rate = (fraud_tx / total_tx) * 100 if total_tx > 0 else 0
+    total_amount = filtered_df['Amount'].sum()
 
-# 6. Evaluation
-y_pred = model.predict(X_test)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Transactions", f"{total_tx:,}")
+    col2.metric("Fraudulent Cases", f"{fraud_tx:,}", delta_color="inverse")
+    col3.metric("Fraud Rate", f"{fraud_rate:.2f}%")
+    col4.metric("Total Volume ($)", f"${total_amount:,.2k}")
 
-print("--- Confusion Matrix ---")
-print(confusion_matrix(y_test, y_pred))
-print("\n--- Classification Report ---")
-print(classification_report(y_test, y_pred))
+    # --- ROW 2: VISUALIZATIONS ---
+    st.divider()
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("Fraud vs Legitimate Distribution")
+        fig_pie = px.pie(filtered_df, names='IsFraud', 
+                         values='Amount', 
+                         hole=0.4,
+                         color='IsFraud',
+                         color_discrete_map={0: '#636EFA', 1: '#EF553B'},
+                         labels={'0': 'Legit', '1': 'Fraud'})
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with c2:
+        st.subheader("Transaction Amount Distribution")
+        fig_hist = px.histogram(filtered_df, x="Amount", color="IsFraud", 
+                                barmode="overlay", 
+                                color_discrete_map={0: '#636EFA', 1: '#EF553B'})
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    # --- ROW 3: CATEGORICAL ANALYSIS ---
+    st.divider()
+    c3, c4 = st.columns(2)
+
+    with c3:
+        st.subheader("Fraud by Transaction Type")
+        fraud_by_type = filtered_df.groupby('TransactionType')['IsFraud'].sum().reset_index()
+        fig_bar = px.bar(fraud_by_type, x='TransactionType', y='IsFraud', 
+                         color='TransactionType', title="Fraud Counts by Type")
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    with c4:
+        st.subheader("Fraud Heatmap by Location")
+        fraud_by_loc = filtered_df.groupby('Location')['IsFraud'].sum().sort_values(ascending=False).reset_index()
+        fig_loc = px.bar(fraud_by_loc, x='IsFraud', y='Location', orientation='h', 
+                         title="Fraud Cases per City", color='IsFraud')
+        st.plotly_chart(fig_loc, use_container_width=True)
+
+    # --- ROW 4: DATA TABLE ---
+    st.divider()
+    st.subheader("🔍 Search Transactions")
+    st.dataframe(filtered_df.sort_values(by='IsFraud', ascending=False), use_container_width=True)
+
+except Exception as e:
+    st.error(f"Please ensure 'credit_card_fraud_dataset.csv' is in the same folder. Error: {e}")
