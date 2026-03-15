@@ -1,0 +1,44 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+
+# 1. Load the dataset
+df = pd.read_csv('credit_card_fraud_dataset.csv')
+
+# 2. Preprocessing
+# Convert TransactionDate to datetime and extract useful features
+df['TransactionDate'] = pd.to_datetime(df['TransactionDate'], dayfirst=True)
+df['Hour'] = df['TransactionDate'].dt.hour
+df['DayOfWeek'] = df['TransactionDate'].dt.dayofweek
+
+# Encode categorical variables
+le = LabelEncoder()
+df['TransactionType'] = le.fit_transform(df['TransactionType'])
+df['Location'] = le.fit_transform(df['Location'])
+
+# Define Features (X) and Target (y)
+# Dropping IDs and the original date string
+X = df.drop(['TransactionID', 'TransactionDate', 'IsFraud'], axis=1)
+y = df['IsFraud']
+
+# 3. Split the data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+# 4. Feature Scaling
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# 5. Train Model (Random Forest is robust for tabular fraud data)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# 6. Evaluation
+y_pred = model.predict(X_test)
+
+print("--- Confusion Matrix ---")
+print(confusion_matrix(y_test, y_pred))
+print("\n--- Classification Report ---")
+print(classification_report(y_test, y_pred))
